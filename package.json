@@ -1,0 +1,32 @@
+{
+  "name": "gmail-mcp",
+  "version": "1.0.0",
+  "description": "Remote Gmail MCP server with Google OAuth, for Claude custom connectors",
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "check": "tsc --noEmit && biome check src",
+    "fix": "biome check --write src"
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@10.9.0",
+  "dependencies": {
+    "@googleapis/gmail": "^22.0.1",
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "express": "^5.2.1",
+    "google-auth-library": "^11.1.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -8,12 +8,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Mailbox } from "../auth/google.js";
-import { encodeMessage, header, type Outgoing, parseMessage } from "./mime.js";
+import { attachmentParts, encodeMessage, header, type Outgoing, parseMessage } from "./mime.js";
 
 const json = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
 /** Long newsletters can blow through a context window on their own. */
 const MAX_BODY_CHARS = 20_000;
+
+/** Gmail caps attachments at 25 MB; anything near that is too big for one tool result. */
+const MAX_ATTACHMENT_BYTES = 15_000_000;
+
+/** Types a model can read as text rather than as a binary blob. */
+const isTextual = (mime: string) =>
+  mime.startsWith("text/") || ["application/json", "application/xml", "application/csv"].includes(mime);
 
 export const makeMcpServer = (mailbox: Mailbox, email: string) => {
   const server = new McpServer(
@@ -122,6 +129,81 @@ export const makeMcpServer = (mailbox: Mailbox, email: string) => {
         body: m.body.length > MAX_BODY_CHARS ? `${m.body.slice(0, MAX_BODY_CHARS)}\n…[truncated]` : m.body,
       }));
       return json({ thread_id, messages });
+    },
+  );
+
+  server.registerTool(
+    "get_attachment",
+    {
+      description:
+        "Download one attachment from a message. get_thread lists each message's attachments with their part_id. " +
+        "Images come back as images, text files as text, and other files (PDF, docs, zips) as an embedded binary resource.",
+      inputSchema: {
+        message_id: z.string(),
+        part_id: z.string().optional().describe("From get_thread's attachments list (preferred)"),
+        filename: z.string().optional().describe("Used when part_id is not given; first match wins"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ message_id, part_id, filename }) => {
+      if (!part_id && !filename) throw new Error("Give part_id or filename");
+      const { data: msg } = await mailbox.users.messages.get({ userId, id: message_id, format: "full" });
+      const all = attachmentParts(msg);
+      const part = all.find((p) => (part_id ? p.partId === part_id : p.filename === filename));
+      if (!part) {
+        const have = all.map((p) => `${p.partId}: ${p.filename}`).join(", ") || "none";
+        throw new Error(`No such attachment on message ${message_id}. Attachments: ${have}`);
+      }
+      const size = part.body?.size ?? 0;
+      if (size > MAX_ATTACHMENT_BYTES)
+        throw new Error(`${part.filename} is ${size} bytes; the limit is ${MAX_ATTACHMENT_BYTES}`);
+
+      // Small parts come inline; larger ones need a second call.
+      let data = part.body?.data;
+      if (!data && part.body?.attachmentId) {
+        const { data: att } = await mailbox.users.messages.attachments.get({
+          userId,
+          messageId: message_id,
+          id: part.body.attachmentId,
+        });
+        data = att.data ?? undefined;
+      }
+      if (!data) throw new Error(`${part.filename} has no content`);
+
+      const bytes = Buffer.from(data, "base64url");
+      const mimeType = part.mimeType ?? "application/octet-stream";
+      const meta = {
+        type: "text" as const,
+        text: JSON.stringify({ filename: part.filename, mime_type: mimeType, size: bytes.length }),
+      };
+
+      if (mimeType.startsWith("image/"))
+        return { content: [meta, { type: "image" as const, data: bytes.toString("base64"), mimeType }] };
+      if (isTextual(mimeType)) {
+        const text = bytes.toString("utf8");
+        return {
+          content: [
+            meta,
+            {
+              type: "text" as const,
+              text: text.length > MAX_BODY_CHARS ? `${text.slice(0, MAX_BODY_CHARS)}\n…[truncated]` : text,
+            },
+          ],
+        };
+      }
+      return {
+        content: [
+          meta,
+          {
+            type: "resource" as const,
+            resource: {
+              uri: `gmail://messages/${message_id}/attachments/${part.partId}/${encodeURIComponent(part.filename ?? "")}`,
+              mimeType,
+              blob: bytes.toString("base64"),
+            },
+          },
+        ],
+      };
     },
   );
 

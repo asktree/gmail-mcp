@@ -19,8 +19,11 @@ export type Message = {
   date: string;
   subject: string;
   body: string;
-  attachments: string[];
+  attachments: Attachment[];
 };
+
+/** What a model needs to pick an attachment and fetch it with get_attachment. */
+export type Attachment = { part_id: string; filename: string; mime_type: string; size: number };
 
 const decode = (data: string) => Buffer.from(data, "base64url").toString("utf8");
 
@@ -69,8 +72,16 @@ export const parseMessage = (msg: gmail_v1.Schema$Message): Message => ({
   date: header(msg, "Date") ?? "",
   subject: header(msg, "Subject") ?? "",
   body: bodyOf(msg),
-  attachments: [...parts(msg.payload)].flatMap((p) => (p.filename ? [p.filename] : [])),
+  attachments: attachmentParts(msg).map((p) => ({
+    part_id: p.partId ?? "",
+    filename: p.filename ?? "",
+    mime_type: p.mimeType ?? "application/octet-stream",
+    size: p.body?.size ?? 0,
+  })),
 });
+
+/** Parts with a filename are attachments (inline images included). */
+export const attachmentParts = (msg: gmail_v1.Schema$Message) => [...parts(msg.payload)].filter((p) => p.filename);
 
 // ## Writing
 

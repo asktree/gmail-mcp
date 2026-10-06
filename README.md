@@ -11,7 +11,8 @@ A remote Gmail [MCP](https://modelcontextprotocol.io) server you host yourself a
 | Tool | |
 |---|---|
 | `search_threads` | Gmail query syntax (`from:`, `is:unread`, `newer_than:7d` …) |
-| `get_thread` | Full thread as plain text |
+| `get_thread` | Full thread as plain text, with each attachment's `part_id`, name, type and size |
+| `get_attachment` | One attachment: images as images, text as text, anything else (PDF …) as an embedded binary resource. Up to 15 MB |
 | `list_labels` | |
 | `create_draft` / `send_message` | Plain text; pass `reply_to_message_id` to reply in-thread |
 | `modify_thread_labels` | Archive, mark read, star, label (names or IDs) |

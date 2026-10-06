@@ -2,7 +2,7 @@
 
 A remote Gmail [MCP](https://modelcontextprotocol.io) server you host yourself and add to Claude as a **custom connector**. Once it's connected, the connector works everywhere you use Claude: claude.ai, desktop, mobile, and Claude Code.
 
-- **Google sign-in when you connect.** Pick a Gmail account when you add the connector. One deployment can serve several accounts; add one connector per inbox.
+- **Google sign-in when you connect.** Pick a Gmail account when you add the connector. One deployment can serve several accounts; add one connector per inbox. claude.ai won't add the same URL twice, so give each extra inbox its own path: `/mcp/work`, `/mcp/personal` (lowercase letters, digits and `-`).
 - **No database.** Every token is encrypted with your `SECRET` and contains everything the server needs to read it back.
 - **Allowlist.** Only the Google accounts in `ALLOWED_EMAILS` can connect.
 

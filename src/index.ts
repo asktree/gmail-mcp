@@ -44,13 +44,35 @@ app.get(CALLBACK_PATH, callback);
 
 // ## MCP
 // Stateless: a fresh server + transport per request, bound to the caller's mailbox.
+//
+// `/mcp/<name>` is the same server under another URL. claude.ai refuses two
+// connectors with the same URL, so a second inbox gets e.g. `/mcp/work`.
+// Each URL is its own OAuth protected resource, so it gets its own metadata.
 
-const auth = requireBearerAuth({
-  verifier: provider,
-  resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(mcpUrl),
+const SLOT = /^[a-z0-9-]{1,40}$/;
+
+const slotUrl = (slot?: string) => (slot ? new URL(`/mcp/${slot}`, config.baseUrl) : mcpUrl);
+
+app.get("/.well-known/oauth-protected-resource/mcp/:slot", (req, res) => {
+  if (!SLOT.test(req.params.slot)) return void res.status(404).end();
+  res.set("Access-Control-Allow-Origin", "*").json({
+    resource: slotUrl(req.params.slot).href,
+    authorization_servers: [config.baseUrl.href],
+    resource_name: "Gmail",
+  });
 });
 
-app.post("/mcp", auth, async (req, res) => {
+/** Checks the bearer token; a 401 points the client at this URL's own metadata. */
+const auth: express.RequestHandler<{ slot?: string }> = (req, res, next) => {
+  const { slot } = req.params;
+  if (slot !== undefined && !SLOT.test(slot)) return void res.status(404).end();
+  requireBearerAuth({
+    verifier: provider,
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(slotUrl(slot)),
+  })(req, res, next);
+};
+
+const serveMcp: express.RequestHandler = async (req, res) => {
   const { email, googleRefreshToken } = MailboxGrant.parse(req.auth?.extra);
   const server = makeMcpServer(google.mailbox(googleRefreshToken), email);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -60,10 +82,13 @@ app.post("/mcp", auth, async (req, res) => {
   });
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
-});
+};
+
+app.post("/mcp", auth, serveMcp);
+app.post("/mcp/:slot", auth, serveMcp);
 
 // Stateless servers have no SSE stream or session to GET or DELETE.
-app.all("/mcp", (_req, res) => {
+app.all(["/mcp", "/mcp/:slot"], (_req, res) => {
   res
     .status(405)
     .set("Allow", "POST")

@@ -292,5 +292,73 @@ export const makeMcpServer = (mailbox: Mailbox, email: string) => {
     },
   );
 
+  server.registerTool(
+    "archive_by_query",
+    {
+      description:
+        "Archive (remove INBOX from) every inbox message that matches a Gmail query, in bulk. " +
+        "Only removes the INBOX label: nothing is trashed, deleted or marked spam. " +
+        "dry_run (the default) only counts matches and shows sample subjects.",
+      inputSchema: {
+        query: z.string().default("").describe("Gmail query; 'in:inbox' is always added"),
+        exclude_ids: z.array(z.string()).default([]).describe("Thread IDs to leave in the inbox"),
+        dry_run: z.boolean().default(true),
+        max_threads: z.number().int().min(1).max(100_000).default(50_000),
+      },
+      annotations: { destructiveHint: false, idempotentHint: true },
+    },
+    async ({ query, exclude_ids, dry_run, max_threads }) => {
+      const excluded = new Set(exclude_ids);
+      const threads = new Set<string>();
+      const ids: string[] = [];
+      let truncated = false;
+      let pageToken: string | undefined;
+      do {
+        const { data } = await mailbox.users.messages.list({
+          userId,
+          q: `in:inbox ${query}`.trim(),
+          maxResults: 500,
+          pageToken,
+        });
+        for (const m of data.messages ?? []) {
+          if (!m.id || !m.threadId || excluded.has(m.threadId)) continue;
+          if (!threads.has(m.threadId) && threads.size >= max_threads) {
+            truncated = true;
+            continue;
+          }
+          threads.add(m.threadId);
+          ids.push(m.id);
+        }
+        pageToken = data.nextPageToken ?? undefined;
+      } while (pageToken);
+
+      const summary = { threads: threads.size, messages: ids.length, truncated, dry_run };
+      if (dry_run) {
+        const sample = await Promise.all(
+          [...threads].slice(0, 10).map(async (id) => {
+            const { data: t } = await mailbox.users.threads.get({
+              userId,
+              id,
+              format: "metadata",
+              metadataHeaders: ["From", "Subject"],
+            });
+            const first = t.messages?.[0] ?? {};
+            return { thread_id: id, from: header(first, "From"), subject: header(first, "Subject") };
+          }),
+        );
+        return json({ ...summary, sample });
+      }
+
+      // batchModify takes at most 1000 IDs per call.
+      for (let i = 0; i < ids.length; i += 1000) {
+        await mailbox.users.messages.batchModify({
+          userId,
+          requestBody: { ids: ids.slice(i, i + 1000), removeLabelIds: ["INBOX"] },
+        });
+      }
+      return json({ ...summary, archived: true });
+    },
+  );
+
   return server;
 };

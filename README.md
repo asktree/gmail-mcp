@@ -17,6 +17,7 @@ A remote Gmail [MCP](https://modelcontextprotocol.io) server you host yourself a
 | `create_draft` / `send_message` | Plain text; pass `reply_to_message_id` to reply in-thread |
 | `modify_thread_labels` | Archive, mark read, star, label (names or IDs) |
 | `trash_thread` | Recoverable for 30 days |
+| `archive_by_query` | Bulk archive: removes INBOX from every inbox message matching a query (skips `exclude_ids` threads). `dry_run` defaults to true |
 
 Scope is `gmail.modify`: read, send, label, trash. It can't permanently delete anything.
 

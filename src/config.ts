@@ -30,6 +30,16 @@ const EnvSchema = z.object({
    * which you almost certainly don't want on a public URL.
    */
   ALLOWED_EMAILS: z.string().min(1, "ALLOWED_EMAILS is required (comma-separated, or * for anyone)"),
+
+  /**
+   * Optional JSON object of `{"email": "what this inbox is for"}`. The note goes
+   * into the server instructions and every tool description, so an agent with
+   * several inboxes connected can tell them apart from the tool list alone.
+   */
+  ACCOUNT_NOTES: z
+    .string()
+    .optional()
+    .transform((s) => (s ? z.record(z.string(), z.string()).parse(JSON.parse(s)) : {})),
 });
 
 export type Config = {
@@ -38,6 +48,8 @@ export type Config = {
   google: { clientId: string; clientSecret: string };
   secret: string;
   isAllowed: (email: string) => boolean;
+  /** What an inbox is for, if ACCOUNT_NOTES says. */
+  noteFor: (email: string) => string | undefined;
 };
 
 export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
@@ -48,6 +60,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
     (e.RAILWAY_PUBLIC_DOMAIN ? `https://${e.RAILWAY_PUBLIC_DOMAIN}` : undefined) ??
     `http://localhost:${e.PORT}`;
 
+  const notes = new Map(Object.entries(e.ACCOUNT_NOTES).map(([k, v]) => [k.trim().toLowerCase(), v.trim()]));
   const allowed = e.ALLOWED_EMAILS.split(",").map((s) => s.trim().toLowerCase());
 
   return {
@@ -56,5 +69,6 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
     google: { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET },
     secret: e.SECRET,
     isAllowed: (email) => allowed.includes("*") || allowed.includes(email.toLowerCase()),
+    noteFor: (email) => notes.get(email.toLowerCase()),
   };
 };

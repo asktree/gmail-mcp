@@ -74,7 +74,7 @@ const auth: express.RequestHandler<{ slot?: string }> = (req, res, next) => {
 
 const serveMcp: express.RequestHandler = async (req, res) => {
   const { email, googleRefreshToken } = MailboxGrant.parse(req.auth?.extra);
-  const server = makeMcpServer(google.mailbox(googleRefreshToken), email);
+  const server = makeMcpServer(google.mailbox(googleRefreshToken), email, config.noteFor(email));
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on("close", () => {
     transport.close();

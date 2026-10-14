@@ -48,6 +48,7 @@ In [Google Cloud Console](https://console.cloud.google.com):
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | From step 2 |
 | `SECRET` | `openssl rand -hex 32`. Rotating it signs everyone out. |
 | `ALLOWED_EMAILS` | `you@gmail.com,other@gmail.com` |
+| `ACCOUNT_NOTES` | Optional. JSON like `{"you@gmail.com": "personal mail"}`. Each note goes into that inbox's server instructions and tool descriptions, so an agent can tell inboxes apart. |
 | `BASE_URL` | Optional on Railway |
 
 ### 4. Connect

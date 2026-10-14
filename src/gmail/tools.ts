@@ -22,13 +22,23 @@ const MAX_ATTACHMENT_BYTES = 15_000_000;
 const isTextual = (mime: string) =>
   mime.startsWith("text/") || ["application/json", "application/xml", "application/csv"].includes(mime);
 
-export const makeMcpServer = (mailbox: Mailbox, email: string) => {
+export const makeMcpServer = (mailbox: Mailbox, email: string, note?: string) => {
+  const account = note ? `${email} (${note})` : email;
   const server = new McpServer(
     { name: "gmail", version: "1.0.0" },
     {
-      instructions: `Gmail for ${email}. Search uses Gmail query syntax (from:, is:unread, newer_than:7d, label:, has:attachment).`,
+      instructions: `Gmail for ${account}. Search uses Gmail query syntax (from:, is:unread, newer_than:7d, label:, has:attachment).`,
     },
   );
+  // Every tool description names the inbox, so agents with several Gmail
+  // connectors can pick the right one from the tool list.
+  const registerTool = server.registerTool.bind(server);
+  server.registerTool = ((name, config, cb) =>
+    registerTool(
+      name,
+      { ...config, description: `${config.description} Inbox: ${account}.` },
+      cb,
+    )) as typeof registerTool;
   const userId = "me";
 
   // ## Helpers

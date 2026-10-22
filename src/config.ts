@@ -32,6 +32,13 @@ const EnvSchema = z.object({
   ALLOWED_EMAILS: z.string().min(1, "ALLOWED_EMAILS is required (comma-separated, or * for anyone)"),
 
   /**
+   * Comma-separated accounts that may send from the v2 (/inboxes) connector.
+   * Unset means no v2 account can send, and v2 has no send_message tool.
+   * v1 connectors keep send_message for every account.
+   */
+  SEND_EMAILS: z.string().default(""),
+
+  /**
    * Optional JSON object of `{"email": "what this inbox is for"}`. The note goes
    * into the server instructions and every tool description, so an agent with
    * several inboxes connected can tell them apart from the tool list alone.
@@ -48,6 +55,8 @@ export type Config = {
   google: { clientId: string; clientSecret: string };
   secret: string;
   isAllowed: (email: string) => boolean;
+  /** Whether the v2 connector may send from this account (SEND_EMAILS). */
+  canSend: (email: string) => boolean;
   /** What an inbox is for, if ACCOUNT_NOTES says. */
   noteFor: (email: string) => string | undefined;
 };
@@ -61,6 +70,9 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
     `http://localhost:${e.PORT}`;
 
   const notes = new Map(Object.entries(e.ACCOUNT_NOTES).map(([k, v]) => [k.trim().toLowerCase(), v.trim()]));
+  const senders = e.SEND_EMAILS.split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
   const allowed = e.ALLOWED_EMAILS.split(",").map((s) => s.trim().toLowerCase());
 
   return {
@@ -69,6 +81,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
     google: { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET },
     secret: e.SECRET,
     isAllowed: (email) => allowed.includes("*") || allowed.includes(email.toLowerCase()),
+    canSend: (email) => senders.includes(email.toLowerCase()),
     noteFor: (email) => notes.get(email.toLowerCase()),
   };
 };

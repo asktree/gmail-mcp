@@ -49,11 +49,16 @@ In [Google Cloud Console](https://console.cloud.google.com):
 | `SECRET` | `openssl rand -hex 32`. Rotating it signs everyone out. |
 | `ALLOWED_EMAILS` | `you@gmail.com,other@gmail.com` |
 | `ACCOUNT_NOTES` | Optional. JSON like `{"you@gmail.com": "personal mail"}`. Each note goes into that inbox's server instructions and tool descriptions, so an agent can tell inboxes apart. |
+| `SEND_EMAILS` | Optional. Comma list of accounts that may send through `/inboxes`. Unset means `/inboxes` has no `send_message` tool. `/mcp` is not affected. |
 | `BASE_URL` | Optional on Railway |
 
 ### 4. Connect
 
 Go to claude.ai → **Settings → Connectors → Add custom connector**, use `https://<your-domain>/mcp`, then sign in with Google.
+
+### 5. One connector for many inboxes (`/inboxes`)
+
+Use `https://<your-domain>/inboxes` as the connector URL instead. Sign-in opens a connect page. Press **Add a Gmail account** once for each inbox, then press **Done**. Every tool then has an `account` field (required when there are two or more inboxes), so one connector covers all inboxes and the tool list is loaded only once. `send_message` is present only for accounts in `SEND_EMAILS`. To add an inbox later, reconnect the connector and add all accounts again. `/mcp` (one inbox per connector) still works as before.
 
 ## How auth works
 

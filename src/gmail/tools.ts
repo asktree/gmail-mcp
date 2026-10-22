@@ -2,9 +2,10 @@
  * # Gmail tools
  *
  * The MCP surface. One server instance is built per request, bound to the
- * mailbox of whoever's access token came in.
+ * mailboxes in whoever's access token came in.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Mailbox } from "../auth/google.js";
@@ -22,23 +23,58 @@ const MAX_ATTACHMENT_BYTES = 15_000_000;
 const isTextual = (mime: string) =>
   mime.startsWith("text/") || ["application/json", "application/xml", "application/csv"].includes(mime);
 
-export const makeMcpServer = (mailbox: Mailbox, email: string, note?: string) => {
-  const account = note ? `${email} (${note})` : email;
+/** One inbox a server can reach. */
+export type Inbox = { email: string; note?: string; mailbox: Mailbox; canSend: boolean };
+
+const label = ({ email, note }: Inbox) => (note ? `${email} (${note})` : email);
+
+/**
+ * v1 (`multi` false) gets exactly one inbox and names it in every tool
+ * description. v2 gets every inbox the user signed in, and each tool takes an
+ * `account` argument instead, so one connector costs one tool list.
+ */
+export const makeMcpServer = (inboxes: [Inbox, ...Inbox[]], multi: boolean) => {
+  const accounts = inboxes.map(label).join(", ");
   const server = new McpServer(
     { name: "gmail", version: "1.0.0" },
     {
-      instructions: `Gmail for ${account}. Search uses Gmail query syntax (from:, is:unread, newer_than:7d, label:, has:attachment).`,
+      instructions: `Gmail for ${accounts}.${multi ? " Pass `account` to pick the inbox." : ""} Search uses Gmail query syntax (from:, is:unread, newer_than:7d, label:, has:attachment).`,
     },
   );
-  // Every tool description names the inbox, so agents with several Gmail
-  // connectors can pick the right one from the tool list.
+
+  // Tool bodies use `mailbox`, which points at the inbox the current call picked.
+  const current = new AsyncLocalStorage<Inbox>();
+  const mailbox = {
+    get users() {
+      return (current.getStore() ?? inboxes[0]).mailbox.users;
+    },
+  };
+
   const registerTool = server.registerTool.bind(server);
-  server.registerTool = ((name, config, cb) =>
-    registerTool(
+  server.registerTool = ((name, config, cb) => {
+    // send_message only reaches inboxes that may send; with none, the tool is left out.
+    const reach = name === "send_message" ? inboxes.filter((i) => i.canSend) : inboxes;
+    if (reach.length === 0) return undefined as never;
+
+    // v1: every tool description names the inbox, so agents with several
+    // Gmail connectors can pick the right one from the tool list.
+    if (!multi) return registerTool(name, { ...config, description: `${config.description} Inbox: ${accounts}.` }, cb);
+
+    const emails = reach.map((i) => i.email) as [string, ...string[]];
+    const account = z
+      .enum(emails)
+      .describe(`Inbox: ${reach.map(label).join(", ")}`)
+      .default(emails[0]);
+    const call = cb as (...a: unknown[]) => unknown;
+    return registerTool(
       name,
-      { ...config, description: `${config.description} Inbox: ${account}.` },
-      cb,
-    )) as typeof registerTool;
+      { ...config, inputSchema: { account: emails.length === 1 ? account : account.unwrap(), ...config.inputSchema } },
+      (({ account, ...args }: { account: string }, extra: unknown) => {
+        const inbox = reach.find((i) => i.email === account) ?? inboxes[0];
+        return current.run(inbox, () => (config.inputSchema ? call(args, extra) : call(extra)));
+      }) as never,
+    );
+  }) as typeof registerTool;
   const userId = "me";
 
   // ## Helpers

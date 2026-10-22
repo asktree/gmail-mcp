@@ -17,10 +17,17 @@ import { z } from "zod";
 
 const Expiring = { exp: z.number() };
 
+/** One signed-in Gmail account. */
+export const Account = z.object({ email: z.string(), googleRefreshToken: z.string() });
+
+/**
+ * A v1 grant holds one account. A v2 (`multi`) grant holds every account the
+ * user signed in on the /inboxes/connect page, so one connector reaches them all.
+ */
 const Grant = {
   clientId: z.string(),
-  email: z.string(),
-  googleRefreshToken: z.string(),
+  accounts: z.array(Account).min(1),
+  multi: z.boolean(),
 };
 
 export const Sealed = z.discriminatedUnion("kind", [
@@ -34,6 +41,9 @@ export const Sealed = z.discriminatedUnion("kind", [
     redirectUri: z.string(),
     codeChallenge: z.string(),
     state: z.string().optional(),
+    /** v2 only: the accounts signed in so far, while the user adds more. */
+    multi: z.boolean(),
+    accounts: z.array(Account),
     ...Expiring,
   }),
 
@@ -53,6 +63,19 @@ export const Sealed = z.discriminatedUnion("kind", [
 export type Sealed = z.infer<typeof Sealed>;
 export type Kind = Sealed["kind"];
 export type Of<K extends Kind> = Extract<Sealed, { kind: K }>;
+
+/**
+ * Tokens sealed before v2 hold one `email` + `googleRefreshToken` and no
+ * `accounts`. Read them as one-account v1 grants, so live v1 connectors keep working.
+ */
+const upgrade = (payload: unknown): unknown => {
+  if (typeof payload !== "object" || payload === null) return payload;
+  const p = payload as Record<string, unknown>;
+  if (p.kind === "pending" && !("accounts" in p)) return { ...p, multi: false, accounts: [] };
+  if ("accounts" in p || typeof p.email !== "string" || typeof p.googleRefreshToken !== "string") return payload;
+  const { email, googleRefreshToken, ...rest } = p;
+  return { ...rest, multi: false, accounts: [{ email, googleRefreshToken }] };
+};
 
 // ## Crypto
 
@@ -90,7 +113,7 @@ export const makeSealer = (secret: string): Sealer => {
   };
 
   const open = <K extends Kind>(kind: K, token: string): Of<K> | undefined => {
-    const parsed = Sealed.safeParse(decrypt(token));
+    const parsed = Sealed.safeParse(upgrade(decrypt(token)));
     if (!parsed.success || parsed.data.kind !== kind) return undefined;
     if ("exp" in parsed.data && parsed.data.exp < Date.now()) return undefined;
     return parsed.data as Of<K>;

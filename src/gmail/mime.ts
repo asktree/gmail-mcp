@@ -30,6 +30,43 @@ const decode = (data: string) => Buffer.from(data, "base64url").toString("utf8")
 export const header = (msg: gmail_v1.Schema$Message, name: string) =>
   msg.payload?.headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
 
+/** Every value of a header that can repeat (Received-SPF, DKIM-Signature, ...), in message order. */
+const headerAll = (msg: gmail_v1.Schema$Message, name: string) =>
+  (msg.payload?.headers ?? [])
+    .filter((h) => h.name?.toLowerCase() === name.toLowerCase() && h.value)
+    .map((h) => h.value as string);
+
+/** Sender-authentication evidence, for checking whether a message is what it claims to be. */
+export type AuthInfo = {
+  /** spf/dkim/dmarc results from Gmail's own Authentication-Results (authserv-id mx.google.com). */
+  verdict: { spf?: string; dkim?: string; dmarc?: string };
+  /** The d= domain of each DKIM-Signature: the domains that signed the message. */
+  dkim_domains: string[];
+  return_path?: string;
+  reply_to?: string;
+  authentication_results: string[];
+  received_spf: string[];
+  arc_authentication_results: string[];
+};
+
+export const authInfo = (msg: gmail_v1.Schema$Message): AuthInfo => {
+  const results = headerAll(msg, "Authentication-Results");
+  // Only Gmail's own stamp counts: a sender can add any Authentication-Results it likes upstream.
+  const gmail = results.find((r) => /^\s*mx\.google\.com\s*;/i.test(r)) ?? "";
+  const result = (method: string) => gmail.match(new RegExp(`\\b${method}=(\\w+)`, "i"))?.[1]?.toLowerCase();
+  return {
+    verdict: { spf: result("spf"), dkim: result("dkim"), dmarc: result("dmarc") },
+    dkim_domains: headerAll(msg, "DKIM-Signature")
+      .map((sig) => sig.match(/(?:^|;)\s*d=([^;\s]+)/)?.[1])
+      .filter((d): d is string => Boolean(d)),
+    return_path: header(msg, "Return-Path"),
+    reply_to: header(msg, "Reply-To"),
+    authentication_results: results,
+    received_spf: headerAll(msg, "Received-SPF"),
+    arc_authentication_results: headerAll(msg, "ARC-Authentication-Results"),
+  };
+};
+
 /** Depth-first walk over a message's MIME tree. */
 const parts = function* (part: gmail_v1.Schema$MessagePart | undefined): Generator<gmail_v1.Schema$MessagePart> {
   if (!part) return;

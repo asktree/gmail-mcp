@@ -49,6 +49,50 @@ export type AuthInfo = {
   arc_authentication_results: string[];
 };
 
+/** Domain of the address in a header like `Name <a@b.com>`; the bracketed address wins over one in the name. */
+const domainOf = (value?: string) =>
+  (value?.match(/<[^>]*@([\w.-]+)>/) ?? value?.match(/@([\w.-]+)/))?.[1]?.toLowerCase();
+
+/** Crude organizational domain: mail.paypal.com -> paypal.com, a.b.co.uk -> b.co.uk. */
+const orgDomain = (domain: string) => {
+  const labels = domain.split(".");
+  const n = labels.length >= 3 && labels.at(-1)?.length === 2 && (labels.at(-2)?.length ?? 0) <= 3 ? 3 : 2;
+  return labels.slice(-n).join(".");
+};
+
+/**
+ * "ok" or "SUSPICIOUS (<reasons>)" for a received message; undefined for mail with no Gmail stamp
+ * (the account's own sent mail). Return-Path is not compared: bulk senders bounce to their
+ * provider's domain, so it would flag most newsletters; DMARC alignment covers it.
+ */
+export const authStatus = (msg: gmail_v1.Schema$Message): string | undefined => {
+  const auth = authInfo(msg);
+  if (!auth.authentication_results.some((r) => /^\s*mx\.google\.com\s*;/i.test(r))) return undefined;
+  const dmarcPass = auth.verdict.dmarc === "pass";
+  const problems: string[] = [];
+  for (const [method, result] of Object.entries(auth.verdict)) {
+    if (result === "pass") continue;
+    // A missing SPF or DKIM result is fine when DMARC passed on the other one.
+    if ((!result || result === "none" || result === "neutral") && dmarcPass && method !== "dmarc") continue;
+    problems.push(`${method}=${result ?? "missing"}`);
+  }
+  const fromHeader = header(msg, "From") ?? "";
+  const from = domainOf(fromHeader);
+  if (from && !dmarcPass && !auth.dkim_domains.some((d) => orgDomain(d.toLowerCase()) === orgDomain(from))) {
+    problems.push(`no DKIM signature from ${from}`);
+  }
+  const replyTo = domainOf(auth.reply_to);
+  if (from && replyTo && orgDomain(replyTo) !== orgDomain(from)) {
+    problems.push(`Reply-To goes to ${replyTo}, not ${from}`);
+  }
+  // "PayPal security@paypal.com" <x@evil.com>: the display name shows an address that is not the sender.
+  const display = fromHeader.includes("<") ? fromHeader.slice(0, fromHeader.indexOf("<")) : "";
+  const shown = display.match(/[\w.+-]+@([\w-]+\.[\w.-]+)/)?.[0]?.toLowerCase();
+  const actual = fromHeader.match(/<([^>]+)>/)?.[1]?.toLowerCase();
+  if (shown && actual && shown !== actual) problems.push(`display name shows ${shown} but sender is ${actual}`);
+  return problems.length ? `SUSPICIOUS (${problems.join("; ")})` : "ok";
+};
+
 export const authInfo = (msg: gmail_v1.Schema$Message): AuthInfo => {
   const results = headerAll(msg, "Authentication-Results");
   // Only Gmail's own stamp counts: a sender can add any Authentication-Results it likes upstream.

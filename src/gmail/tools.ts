@@ -8,7 +8,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Mailbox } from "../auth/google.js";
-import { attachmentParts, authInfo, encodeMessage, header, type Outgoing, parseMessage } from "./mime.js";
+import { attachmentParts, authInfo, authStatus, encodeMessage, header, type Outgoing, parseMessage } from "./mime.js";
 
 const json = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
@@ -130,7 +130,8 @@ export const makeMcpServer = (mailbox: Mailbox, email: string, note?: string) =>
     {
       description:
         "Read every message in a thread, with bodies as plain text. " +
-        "Set include_auth to also get SPF/DKIM/DMARC results, Return-Path and Reply-To (for phishing checks).",
+        'Each received message has auth: "ok" or "SUSPICIOUS (reasons)" from SPF/DKIM/DMARC, From alignment and Reply-To. ' +
+        "Set include_auth for the raw sender-authentication headers.",
       inputSchema: {
         thread_id: z.string(),
         include_auth: z.boolean().default(false).describe("Add each message's sender-authentication headers"),
@@ -144,7 +145,8 @@ export const makeMcpServer = (mailbox: Mailbox, email: string, note?: string) =>
         return {
           ...m,
           body: m.body.length > MAX_BODY_CHARS ? `${m.body.slice(0, MAX_BODY_CHARS)}\n…[truncated]` : m.body,
-          ...(include_auth ? { auth: authInfo(raw) } : {}),
+          ...(include_auth ? { auth_headers: authInfo(raw) } : {}),
+          ...((status) => (status ? { auth: status } : {}))(authStatus(raw)),
         };
       });
       return json({ thread_id, messages });

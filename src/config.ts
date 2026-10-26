@@ -26,17 +26,26 @@ const EnvSchema = z.object({
   SECRET: z.string().min(32, "SECRET must be at least 32 characters"),
 
   /**
-   * Comma-separated Google accounts allowed to connect. `*` allows anyone,
-   * which you almost certainly don't want on a public URL.
+   * Comma-separated Google accounts allowed to connect. `*` allows anyone
+   * with a Google account. Each person still reaches only the inboxes they
+   * sign in to, so `*` exposes no one else's mail; it does let anyone use
+   * your Google app's quota.
    */
   ALLOWED_EMAILS: z.string().min(1, "ALLOWED_EMAILS is required (comma-separated, or * for anyone)"),
 
   /**
    * Comma-separated accounts that may send from the v2 (/inboxes) connector.
-   * Unset means no v2 account can send, and v2 has no send_message tool.
-   * v1 connectors keep send_message for every account.
+   * `*` lets every account send. Unset means no v2 account can send, and v2
+   * has no send_message tool. v1 connectors keep send_message for every account.
    */
   SEND_EMAILS: z.string().default(""),
+
+  /**
+   * Comma-separated accounts that may never send from v2, even with
+   * SEND_EMAILS=*. Use it to keep your own inboxes draft-only while
+   * other people send from theirs.
+   */
+  NO_SEND_EMAILS: z.string().default(""),
 
   /**
    * Optional JSON object of `{"email": "what this inbox is for"}`. The note goes
@@ -70,10 +79,14 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
     `http://localhost:${e.PORT}`;
 
   const notes = new Map(Object.entries(e.ACCOUNT_NOTES).map(([k, v]) => [k.trim().toLowerCase(), v.trim()]));
-  const senders = e.SEND_EMAILS.split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  const allowed = e.ALLOWED_EMAILS.split(",").map((s) => s.trim().toLowerCase());
+  const list = (s: string) =>
+    s
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+  const senders = list(e.SEND_EMAILS);
+  const noSend = list(e.NO_SEND_EMAILS);
+  const allowed = list(e.ALLOWED_EMAILS);
 
   return {
     port: e.PORT,
@@ -81,7 +94,8 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): Config => {
     google: { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET },
     secret: e.SECRET,
     isAllowed: (email) => allowed.includes("*") || allowed.includes(email.toLowerCase()),
-    canSend: (email) => senders.includes(email.toLowerCase()),
+    canSend: (email) =>
+      !noSend.includes(email.toLowerCase()) && (senders.includes("*") || senders.includes(email.toLowerCase())),
     noteFor: (email) => notes.get(email.toLowerCase()),
   };
 };

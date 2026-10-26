@@ -4,7 +4,7 @@ A remote Gmail [MCP](https://modelcontextprotocol.io) server you host yourself a
 
 - **Google sign-in when you connect.** Pick a Gmail account when you add the connector. One deployment can serve several accounts; add one connector per inbox. claude.ai won't add the same URL twice, so give each extra inbox its own path: `/mcp/work`, `/mcp/personal` (lowercase letters, digits and `-`).
 - **No database.** Every token is encrypted with your `SECRET` and contains everything the server needs to read it back.
-- **Allowlist.** Only the Google accounts in `ALLOWED_EMAILS` can connect.
+- **Allowlist.** Only the Google accounts in `ALLOWED_EMAILS` can connect (`*` for anyone; each person still reaches only the inboxes they sign in to).
 
 ## Tools
 
@@ -49,7 +49,8 @@ In [Google Cloud Console](https://console.cloud.google.com):
 | `SECRET` | `openssl rand -hex 32`. Rotating it signs everyone out. |
 | `ALLOWED_EMAILS` | `you@gmail.com,other@gmail.com` |
 | `ACCOUNT_NOTES` | Optional. JSON like `{"you@gmail.com": "personal mail"}`. Each note goes into that inbox's server instructions and tool descriptions, so an agent can tell inboxes apart. |
-| `SEND_EMAILS` | Optional. Comma list of accounts that may send through `/inboxes`. Unset means `/inboxes` has no `send_message` tool. `/mcp` is not affected. |
+| `SEND_EMAILS` | Optional. Comma list of accounts that may send through `/inboxes`, or `*` for all. Unset means `/inboxes` has no `send_message` tool. `/mcp` is not affected. |
+| `NO_SEND_EMAILS` | Optional. Comma list of accounts that never send through `/inboxes`, even with `SEND_EMAILS=*`. |
 | `BASE_URL` | Optional on Railway |
 
 ### 4. Connect
@@ -58,7 +59,7 @@ Go to claude.ai → **Settings → Connectors → Add custom connector**, use `h
 
 ### 5. One connector for many inboxes (`/inboxes`)
 
-Use `https://<your-domain>/inboxes` as the connector URL instead. Sign-in opens a connect page. Press **Add a Gmail account** once for each inbox, then press **Done**. Every tool then has an `account` field (required when there are two or more inboxes), so one connector covers all inboxes and the tool list is loaded only once. `send_message` is present only for accounts in `SEND_EMAILS`. To add an inbox later, reconnect the connector and add all accounts again. `/mcp` (one inbox per connector) still works as before.
+Use `https://<your-domain>/inboxes` as the connector URL instead. Sign-in opens a connect page. Press **Add a Gmail account** once for each inbox, then press **Done**. Every tool then has an `account` field (required when there are two or more inboxes), so one connector covers all inboxes and the tool list is loaded only once. `send_message` is present only for accounts in `SEND_EMAILS` (and not in `NO_SEND_EMAILS`). Users can also turn the tool off in their claude.ai connector settings. To add an inbox later, reconnect the connector and add all accounts again. `/mcp` (one inbox per connector) still works as before.
 
 ## How auth works
 

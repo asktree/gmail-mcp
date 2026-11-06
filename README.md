@@ -12,6 +12,7 @@ A remote Gmail [MCP](https://modelcontextprotocol.io) server you host yourself a
 |---|---|
 | `search_threads` | Gmail query syntax (`from:`, `is:unread`, `newer_than:7d` …) |
 | `get_thread` | Full thread as plain text, with each attachment's `part_id`, name, type and size. Each received message has `auth`: `ok` or `SUSPICIOUS (reasons)`, from Gmail's own SPF/DKIM/DMARC results, DKIM alignment with From, a Reply-To on another domain, and a display name that shows a different address. `include_auth: true` adds the raw evidence as `auth_headers` |
+| `get_message_html` | Raw HTML of one message, unmodified, plus every link (text and href). Use it for button URLs that get_thread drops |
 | `get_attachment` | One attachment: images as images, text as text, anything else (PDF …) as an embedded binary resource. Up to 15 MB |
 | `list_labels` | |
 | `create_draft` / `send_message` | Plain text; pass `reply_to_message_id` to reply in-thread |

@@ -9,12 +9,24 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Mailbox } from "../auth/google.js";
-import { attachmentParts, authInfo, authStatus, encodeMessage, header, type Outgoing, parseMessage } from "./mime.js";
+import {
+  attachmentParts,
+  authInfo,
+  authStatus,
+  decodeBody,
+  encodeMessage,
+  header,
+  htmlParts,
+  linksOf,
+  type Outgoing,
+  parseMessage,
+} from "./mime.js";
 
 const json = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
 /** Long newsletters can blow through a context window on their own. */
 const MAX_BODY_CHARS = 20_000;
+const MAX_HTML_CHARS = 200_000;
 
 /** Gmail caps attachments at 25 MB; anything near that is too big for one tool result. */
 const MAX_ATTACHMENT_BYTES = 15_000_000;
@@ -186,6 +198,46 @@ export const makeMcpServer = (inboxes: [Inbox, ...Inbox[]], multi: boolean) => {
         };
       });
       return json({ thread_id, messages });
+    },
+  );
+
+  server.registerTool(
+    "get_message_html",
+    {
+      description:
+        "Get the raw HTML body of one message, unmodified, plus every link in it (text and href). " +
+        "Use it when get_thread's plain text loses a button or link URL. Message ids come from get_thread.",
+      inputSchema: { message_id: z.string() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ message_id }) => {
+      const { data: msg } = await mailbox.users.messages.get({ userId, id: message_id, format: "full" });
+      const bodies: string[] = [];
+      for (const part of htmlParts(msg)) {
+        let data = part.body?.data;
+        if (!data && part.body?.attachmentId) {
+          const { data: att } = await mailbox.users.messages.attachments.get({
+            userId,
+            messageId: message_id,
+            id: part.body.attachmentId,
+          });
+          data = att.data ?? undefined;
+        }
+        if (data) bodies.push(decodeBody(data));
+      }
+      if (!bodies.length) throw new Error(`Message ${message_id} has no HTML part`);
+      const full = bodies.join("\n");
+      const html = full.length > MAX_HTML_CHARS ? full.slice(0, MAX_HTML_CHARS) : full;
+      return json({
+        message_id,
+        thread_id: msg.threadId,
+        subject: header(msg, "Subject"),
+        links: linksOf(full),
+        html,
+        ...(html.length < full.length && {
+          truncated: `HTML cut at ${MAX_HTML_CHARS} of ${full.length} characters; links lists all of them`,
+        }),
+      });
     },
   );
 

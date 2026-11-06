@@ -197,3 +197,21 @@ export const encodeMessage = (m: Outgoing) => {
   const body = Buffer.from(m.body, "utf8").toString("base64");
   return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${body}`).toString("base64url");
 };
+
+/** The text/html body parts of a message, in MIME order (attachments excluded). */
+export const htmlParts = (msg: gmail_v1.Schema$Message) =>
+  [...parts(msg.payload)].filter((p) => p.mimeType === "text/html" && !p.filename);
+
+export const decodeBody = decode;
+
+/** Every <a href> in the HTML, with its visible text. */
+export const linksOf = (html: string) => {
+  const out: { text: string; href: string }[] = [];
+  for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const text = htmlToText(m[3] ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    out.push({ text, href: (m[2] ?? "").replace(/&amp;/g, "&") });
+  }
+  return out;
+};
